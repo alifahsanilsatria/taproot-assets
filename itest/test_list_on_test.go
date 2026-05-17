@@ -6,6 +6,10 @@ import "github.com/lightninglabs/taproot-assets/proof"
 
 var allTestCases = []*testCase{
 	{
+		name: "most common usecase mint stablecoin",
+		test: testMostCommonUsecaseMintStablecoin,
+	},
+	{
 		name: "psbt stxo exclusion proofs",
 		test: testPsbtSTXOExclusionProofs,
 	},
