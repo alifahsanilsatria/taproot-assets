@@ -152,6 +152,10 @@ func testMostCommonUsecaseMintStablecoin(t *harnessTest) {
 				},
 				TxOut: []*wire.TxOut{
 					// [anchorOutputIndex=0] Asset anchor output (Taproot/P2TR)
+					// TUJUAN: MINTER SENDIRI (self-spend).
+					//   BatchKey di-derive oleh tapd minter via
+					//   KeyRing.DeriveNextKey() (planter.go:692),
+					//   disimpan di key store minter.
 					// PkScript di-set oleh caretaker.go:650-651:
 					//   genesisScript() (batch.go:278)
 					//     → txscript.PayToTaprootScript(mintingOutputKey)
@@ -161,6 +165,13 @@ func testMostCommonUsecaseMintStablecoin(t *harnessTest) {
 					//       TapscriptRoot[:],           ← root hash dari
 					//         RootAssetCommitment tree  ← Taproot Asset commitment
 					//     )
+					// CATATAN: Tidak ada field "address" di wire.MsgTx.
+					//   "Address" (bcrt1p...) adalah derivasi eksternal
+					//   dari PkScript oleh wallet/explorer:
+					//     PkScript[2:34] → bech32m → "bcrt1p..."
+					//   Yang dikirim on-chain HANYA PkScript di atas.
+					//   Bitcoin node biasa hanya melihat 1000 sats
+					//   di P2TR output; tidak tahu ada aset USDT.
 					{
 						Value: 1000, // DummyAmtSats (tapsend/send.go:42)
 						PkScript: []byte{
@@ -171,13 +182,21 @@ func testMostCommonUsecaseMintStablecoin(t *harnessTest) {
 						}, // total 34 bytes (P2TR script)
 					},
 					// [changeOutputIndex=1] Change output
-					// Sisa sats dikembalikan ke lnd wallet.
-					// Ditambahkan oleh lnd FundPsbt (planter.go:1067).
-					// Wajib ada: planter.go:1073 cek ChangeOutputIndex != -1.
+					// TUJUAN: MINTER SENDIRI (lnd wallet).
+					//   Sisa sats dikembalikan ke lnd wallet minter.
+					//   Ditambahkan oleh lnd FundPsbt (planter.go:1067).
+					//   Wajib ada: planter.go:1073 cek ChangeOutputIndex != -1.
+					// CATATAN: Tidak ada field "address" di wire.MsgTx.
+					//   "Address" hanya derivasi eksternal dari PkScript.
 					{
 						Value:    <sisa sats setelah anchor + fee>,
 						PkScript: []byte{<lnd wallet change script>},
 					},
+					//
+					// Kesimpulan: KEDUA output milik minter sendiri.
+					// Minting = self-spend. Distribusi USDT ke pihak
+					// lain (exchange, user) dilakukan via operasi
+					// send/transfer terpisah (bukan di transaksi ini).
 				},
 			}
 
@@ -210,12 +229,16 @@ func testMostCommonUsecaseMintStablecoin(t *harnessTest) {
 					},
 				},
 				TxOut: []*wire.TxOut{
-					// [0] Asset anchor (P2TR)
+					// [0] Asset anchor (P2TR) → MINTER SENDIRI
 					//     1000 sats = DummyAmtSats, cukup di atas dust limit.
 					//     PkScript = PayToTaprootScript(mintingOutputKey).
 					//     mintingOutputKey = ComputeTaprootOutputKey(
 					//       BatchKey.PubKey, TapscriptRoot,
 					//     ) → batch.go:201
+					//     Tidak ada field "address" di wire.MsgTx.
+					//     PkScript[2:] → bech32m (oleh wallet/explorer)
+					//       → "bcrt1p..." (di luar data transaksi)
+					//     Tersembunyi di dalam PkScript: 1,000,000.00 USDT
 					{
 						Value: 1000,
 						PkScript: []byte{
@@ -230,7 +253,8 @@ func testMostCommonUsecaseMintStablecoin(t *harnessTest) {
 							0x94, 0x1d, 0xe6, 0x4a,
 						}, // 34 bytes total
 					},
-					// [1] Change (witness v0, P2WSH-like)
+					// [1] Change (witness v0, P2WSH-like) → MINTER SENDIRI
+					//     Sisa sats dikembalikan ke lnd wallet Alice.
 					//     mock.go:388 → anchorBalance(100000) - anchor(1000) = 99000
 					//     mock.go:401 → 99000 - fee(~250) = ~98750
 					//     PkScript: copy GenesisDummyScript, ganti byte[0]
