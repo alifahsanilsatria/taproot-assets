@@ -169,9 +169,13 @@ func testMostCommonUsecaseMintStablecoin(t *harnessTest) {
 					//   "Address" (bcrt1p...) adalah derivasi eksternal
 					//   dari PkScript oleh wallet/explorer:
 					//     PkScript[2:34] → bech32m → "bcrt1p..."
-					//   Yang dikirim on-chain HANYA PkScript di atas.
-					//   Bitcoin node biasa hanya melihat 1000 sats
-					//   di P2TR output; tidak tahu ada aset USDT.
+					//   Yang dikirim on-chain HANYA PkScript (tweaked
+					//   pubkey 32 bytes) — bukan data USDT itu sendiri.
+					//   PkScript hanya mengandung commitment HASH ke
+					//   Taproot Asset tree (via TapscriptRoot yang
+					//   ter-embed di tweaked key). Data asli USDT
+					//   (jumlah, asset ID, ScriptKey) hidup off-chain
+					//   di proof file dan database tapd.
 					{
 						Value: 1000, // DummyAmtSats (tapsend/send.go:42)
 						PkScript: []byte{
@@ -238,7 +242,14 @@ func testMostCommonUsecaseMintStablecoin(t *harnessTest) {
 					//     Tidak ada field "address" di wire.MsgTx.
 					//     PkScript[2:] → bech32m (oleh wallet/explorer)
 					//       → "bcrt1p..." (di luar data transaksi)
-					//     Tersembunyi di dalam PkScript: 1,000,000.00 USDT
+					//     PkScript hanya berisi tweaked pubkey (32 bytes):
+					//       ComputeTaprootOutputKey(BatchKey.PubKey,
+					//         TapscriptRoot)
+					//     TapscriptRoot = root HASH dari Taproot Asset tree.
+					//     Data USDT (jumlah, asset ID, ScriptKey) TIDAK ada
+					//     di PkScript — hanya commitment hash-nya saja.
+					//     Data asli USDT hidup off-chain di proof file
+					//     dan database tapd.
 					{
 						Value: 1000,
 						PkScript: []byte{
