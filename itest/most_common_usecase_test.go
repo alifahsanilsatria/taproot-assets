@@ -165,6 +165,104 @@ func testMostCommonUsecaseMintStablecoin(t *harnessTest) {
 					//       TapscriptRoot[:],           ← root hash dari
 					//         RootAssetCommitment tree  ← Taproot Asset commitment
 					//     )
+					//
+					//   mintingOutputKey (human-readable):
+					//     Type : *btcec.PublicKey (compressed secp256k1)
+					//     Size : 33 bytes compressed (02/03 prefix + 32 bytes x)
+					//     Contoh: 02b4632d08485ff1df2db55b9dafd23347d1c47a
+					//                457072a1e87be26a2dff5bfcd2
+					//     Rumus BIP-341:
+					//       mintingOutputKey =
+					//         BatchKey.PubKey
+					//         + hash_tapTweak(
+					//             BatchKey.PubKey || TapscriptRoot
+					//           ) * G
+					//     Dimana TapscriptRoot (32 bytes) dihitung dari:
+					//       TapLeaf V2 (73 bytes) =
+					//         sha256("taproot-assets:194243") (32 bytes, tag)
+					//         || 0x02                         (1 byte, version V2)
+					//         || rootHash                     (32 bytes, MS-SMT root)
+					//         || rootSum                      (8 bytes, big-endian
+					//                                          = 100000000 untuk USDT)
+					//       TapscriptRoot = BIP-341_TapLeafHash(TapLeaf V2)
+					//     Nilai pasti mintingOutputKey berbeda setiap run
+					//     karena BatchKey.PubKey di-generate random oleh
+					//     KeyRing.DeriveNextKey() (planter.go:692).
+					//
+					//   txscript.PayToTaprootScript(mintingOutputKey)
+					//   (human-readable):
+					//     Size : 34 bytes
+					//     Format: [OP_1] [OP_DATA_32] [x-only pubkey]
+					//     Byte-by-byte:
+					//       0x51  = OP_1 (SegWit version 1 = Taproot)
+					//       0x20  = OP_DATA_32 (push 32 bytes ke stack)
+					//       <32 bytes> = x-only coordinate dari
+					//                    mintingOutputKey (tanpa prefix
+					//                    02/03, hanya koordinat x)
+					//     Contoh: 51 20 b4632d08485ff1df2db55b9dafd233
+					//                   47d1c47a457072a1e87be26a2dff5bfcd2
+					//
+					// Q: PkScript berubah setiap minting, bagaimana
+					//    verifikasi kepemilikan saat output di-spend?
+					//
+					// A: PkScript memang unik setiap minting, tapi
+					//    private key BatchKey tetap tersimpan di lnd
+					//    wallet. Mekanismenya:
+					//
+					//    1. Private key tidak hilang:
+					//       BatchKey dibuat via KeyRing.DeriveNextKey()
+					//       (planter.go:692) — HD key derivation di lnd.
+					//       Private key tersimpan di lnd wallet, bukan
+					//       tapd. Key descriptor (derivation path)
+					//       disimpan di MintingBatch.BatchKey. Kapan pun
+					//       perlu sign, lnd bisa me-regenerate private
+					//       key dari derivation path tersebut.
+					//
+					//    2. Spend type: Taproot KEY-PATH spend.
+					//       Witness hanya berisi 1 element:
+					//         [schnorr_signature]  (64 bytes)
+					//       Tidak perlu reveal script atau control block.
+					//
+					//    3. Flow signing saat transfer
+					//       (tapsend/send.go:762-870):
+					//
+					//       a) PSBT dibuat dengan info anchor input:
+					//          - TaprootInternalKey = BatchKey.PubKey
+					//          - TaprootMerkleRoot  = TapscriptRoot
+					//          - Bip32Derivation    = key path di wallet
+					//            (supaya lnd tahu private key mana)
+					//
+					//       b) lnd SignPsbt() menerima PSBT:
+					//          - Cari private key via Bip32Derivation
+					//          - Tweak private key dengan TapscriptRoot:
+					//              tweakedPrivKey =
+					//                privKey + hash_tapTweak(
+					//                  pubKey || TapscriptRoot
+					//                )
+					//          - Sign dengan tweakedPrivKey
+					//            → Schnorr signature (64 bytes)
+					//
+					//       c) Bitcoin node memverifikasi:
+					//          - Ambil x-only pubkey dari PkScript[2:34]
+					//          - Verifikasi Schnorr signature terhadap
+					//            pubkey tersebut
+					//          - Valid → transaksi diterima
+					//
+					//    4. Data yang tersimpan untuk spending:
+					//       - Private key → lnd wallet (HD derivation)
+					//       - TapscriptRoot (tweak) → tapd database
+					//         (sebagai bagian dari batch record)
+					//       Keduanya dibutuhkan untuk membuka "gembok"
+					//       PkScript.
+					//
+					//    5. Bitcoin network TIDAK perlu tahu isi
+					//       commitment tree. Yang dicek hanya:
+					//         "Apakah Schnorr signature valid untuk
+					//          public key di PkScript?"
+					//       Ini murni cryptographic verification —
+					//       setiap PkScript punya pasangan tweaked
+					//       private key-nya masing-masing.
+
 					// CATATAN: Tidak ada field "address" di wire.MsgTx.
 					//   "Address" (bcrt1p...) adalah derivasi eksternal
 					//   dari PkScript oleh wallet/explorer:
